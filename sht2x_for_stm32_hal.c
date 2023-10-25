@@ -7,6 +7,8 @@ extern "C"{
 #endif
 
 I2C_HandleTypeDef *_sht2x_ui2c;
+uint8_t receive_complited = 0;
+uint8_t raw_val[3] = {0};
 	
 /**
  * @brief Initializes the SHT2x temperature/humidity sensor.
@@ -131,6 +133,48 @@ uint32_t SHT2x_Ipow(uint32_t base, uint32_t power) {
 	for (uint32_t i = 1; i < power; i++)
 		temp *= base;
 	return temp;
+}
+
+uint8_t SHT2x_GetRaw_NonBlock(uint8_t param, uint8_t hold) {
+  static uint8_t is_rx = 0;
+
+  uint8_t cmd = 0;
+  if (param == 0) {
+    cmd = (hold ? SHT2x_READ_TEMP_HOLD : SHT2x_READ_TEMP_NOHOLD);
+  } else if (param == 1) {
+    cmd = (hold ? SHT2x_READ_RH_HOLD : SHT2x_READ_RH_NOHOLD);
+  }
+
+  if (!is_rx) {
+    receive_complited = 0;
+    is_rx = 1;
+    HAL_I2C_Master_Transmit(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, &cmd, 1, SHT2x_TIMEOUT);
+    HAL_I2C_Master_Receive_IT(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, raw_val, 3);
+  }
+
+  if (receive_complited && is_rx) {
+    receive_complited = 0;
+    is_rx = 0;
+    return 0;
+  }
+
+  return 1;
+}
+
+float SHT2x_ReadRelativeHumidity(void) {
+  uint16_t val = raw_val[0] << 8 | raw_val[1];
+  return -6 + 125.00 * (val / 65536.0);
+}
+
+float SHT2x_ReadTemperature(void) {
+  uint16_t val = raw_val[0] << 8 | raw_val[1];
+  return -46.85 + 175.72 * (val / 65536.0);
+}
+
+void HAL_I2C_MasterRxCpltCallback (I2C_HandleTypeDef * hi2c) {
+  if (hi2c == _sht2x_ui2c) {
+    receive_complited = 1;
+  }
 }
 
 #ifdef __cplusplus

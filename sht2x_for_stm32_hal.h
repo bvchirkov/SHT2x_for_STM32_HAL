@@ -13,7 +13,7 @@
 #define	SHT2x_WRITE_REG			0xe6
 #define SHT2x_READ_REG			0xe7
 #define SHT2x_SOFT_RESET		0xfe
-#define SHT2x_TIMEOUT			1000
+#define SHT2x_TIMEOUT			500
 /*----------------------------------------------------------------------------*/
 typedef enum SHT2x_Resolution {
 	RES_14_12 = 0x00,
@@ -41,5 +41,9 @@ float SHT2x_CelsiusToKelvin(float celsius);
 int32_t SHT2x_GetInteger(float f);
 uint32_t SHT2x_GetDecimal(float f, int digits);
 uint32_t SHT2x_Ipow(uint32_t x, uint32_t y);
+
+uint8_t SHT2x_GetRaw_NonBlock(uint8_t param, uint8_t hold);
+float SHT2x_ReadRelativeHumidity(void);
+float SHT2x_ReadTemperature(void);
 
 #endif
