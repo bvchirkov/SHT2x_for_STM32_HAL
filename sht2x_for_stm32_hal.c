@@ -55,8 +55,8 @@ uint16_t SHT2x_GetRaw(uint8_t cmd) {
  * @param hold Holding mode, 0 for no hold master, 1 for hold master.
  * @return Floating point temperature value.
  */
-float SHT2x_GetTemperature(uint8_t hold) {
-	uint8_t cmd = (hold ? SHT2x_READ_TEMP_HOLD : SHT2x_READ_TEMP_NOHOLD);
+float SHT2x_GetTemperature(SHT2x_MasterMode mode) {
+	uint8_t cmd = (mode ? SHT2x_READ_TEMP_HOLD : SHT2x_READ_TEMP_NOHOLD);
 	return -46.85 + 175.72 * (SHT2x_GetRaw(cmd) / 65536.0);
 }
 
@@ -65,8 +65,8 @@ float SHT2x_GetTemperature(uint8_t hold) {
  * @param hold Holding mode, 0 for no hold master, 1 for hold master.
  * @return Floating point relative humidity value.
  */
-float SHT2x_GetRelativeHumidity(uint8_t hold) {
-	uint8_t cmd = (hold ? SHT2x_READ_RH_HOLD : SHT2x_READ_RH_NOHOLD);
+float SHT2x_GetRelativeHumidity(SHT2x_MasterMode mode) {
+	uint8_t cmd = (mode ? SHT2x_READ_RH_HOLD : SHT2x_READ_RH_NOHOLD);
 	return -6 + 125.00 * (SHT2x_GetRaw(cmd) / 65536.0);
 }
 
@@ -135,14 +135,14 @@ uint32_t SHT2x_Ipow(uint32_t base, uint32_t power) {
 	return temp;
 }
 
-uint8_t SHT2x_GetRaw_NonBlock(uint8_t param, uint8_t hold) {
+uint8_t SHT2x_GetRaw_NonBlock(SHT2x_Param param, SHT2x_MasterMode mode) {
   static uint8_t is_rx = 0;
 
   uint8_t cmd = 0;
-  if (param == 0) {
-    cmd = (hold ? SHT2x_READ_TEMP_HOLD : SHT2x_READ_TEMP_NOHOLD);
-  } else if (param == 1) {
-    cmd = (hold ? SHT2x_READ_RH_HOLD : SHT2x_READ_RH_NOHOLD);
+  if (param == SHT2x_TEMPERATURE) {
+    cmd = (mode ? SHT2x_READ_TEMP_HOLD : SHT2x_READ_TEMP_NOHOLD);
+  } else if (param == SHT2x_HUMIDITY) {
+    cmd = (mode ? SHT2x_READ_RH_HOLD : SHT2x_READ_RH_NOHOLD);
   }
 
   if (!is_rx) {
