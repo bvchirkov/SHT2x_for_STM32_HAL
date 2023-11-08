@@ -2,7 +2,7 @@
 /* Library by @eepj www.github.com/eepj */
 #ifndef SHT2X_FOR_STM32_HAL_H
 #define SHT2X_FOR_STM32_HAL_H
-#include "main.h"
+#include "stm32f1xx_hal.h"
 /*----------------------------------------------------------------------------*/
 #define SHT2x_I2C_ADDR			    0x40
 #define SHT2x_READ_TEMP_HOLD	  0xe3
@@ -13,6 +13,8 @@
 #define SHT2x_READ_REG			    0xe7
 #define SHT2x_SOFT_RESET		    0xfe
 #define SHT2x_TIMEOUT			      500
+
+#define SHT2x_DIVIDER           (float)(1 << 16)
 /*----------------------------------------------------------------------------*/
 typedef enum SHT2x_Resolution {
 	RES_14_12 = 0x00,
@@ -24,12 +26,18 @@ typedef enum SHT2x_Resolution {
 typedef enum SHT2x_Param {
   SHT2x_TEMPERATURE,
   SHT2x_HUMIDITY
-} SHT2x_Param;
+} SHT2x_ParamType;
 
 typedef enum SHT2x_MasterMode {
   SHT2x_NO_HOLD_MASTER,
   SHT2x_HOLD_MASTER
 } SHT2x_MasterMode;
+
+typedef enum SHT2x_NBRequest_Status
+{
+  SHT2x_REQ_DATA_RECEIVED,
+  SHT2x_REQ_DATA_WAIT
+} SHT2x_RequestStatus;
 /*----------------------------------------------------------------------------*/
 extern I2C_HandleTypeDef *_sht2x_ui2c;
 
@@ -48,11 +56,10 @@ float SHT2x_CelsiusToFahrenheit(float celsius);
 float SHT2x_CelsiusToKelvin(float celsius);
 
 int32_t  SHT2x_GetInteger(float f);
-uint32_t SHT2x_GetDecimal(float f, int digits);
-uint32_t SHT2x_Ipow(uint32_t x, uint32_t y);
+uint32_t SHT2x_GetDecimal(float f, uint8_t digits);
 
-uint8_t SHT2x_GetRaw_NonBlock(SHT2x_Param param, SHT2x_MasterMode mode);
-float   SHT2x_ReadRelativeHumidity(void);
-float   SHT2x_ReadTemperature(void);
+SHT2x_RequestStatus SHT2x_NonBlock_RequestRaw(SHT2x_ParamType param, SHT2x_MasterMode mode);
+float               SHT2x_NonBlock_ReadRelativeHumidity(void);
+float               SHT2x_NonBlock_ReadTemperature(void);
 
 #endif

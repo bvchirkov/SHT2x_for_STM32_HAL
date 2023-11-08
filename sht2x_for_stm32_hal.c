@@ -1,14 +1,19 @@
 /* An STM32 HAL library written for the SHT2x temperature/humidity sensor series. */
 /* Libraries by @eepj www.github.com/eepj */
 #include "sht2x_for_stm32_hal.h"
-#include "main.h"
+#include <stdbool.h>
 #ifdef __cplusplus
 extern "C"{
 #endif
 
-I2C_HandleTypeDef *_sht2x_ui2c;
-uint8_t receive_complited = 0;
-uint8_t raw_val[3] = {0};
+#define BUF_TO_VALUE(BUF) (uint16_t)(((BUF[0] << 8) & 0xFF00) | (BUF[1] & 0x00FF))
+
+static uint32_t SHT2x_Ipow(uint32_t, uint8_t);
+
+I2C_HandleTypeDef*  _sht2x_ui2c  = NULL;
+uint8_t             raw_val[3]   = {0};
+
+__IO _Bool is_reseived_data = false;
 	
 /**
  * @brief Initializes the SHT2x temperature/humidity sensor.
@@ -31,7 +36,7 @@ void SHT2x_SoftReset(void){
  * @return 8-bit value stored in user register, 0 to 255.
  */
 uint8_t SHT2x_ReadUserReg(void) {
-	uint8_t val;
+	uint8_t val = 0;
 	uint8_t cmd = SHT2x_READ_REG;
 	HAL_I2C_Master_Transmit(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, &cmd, 1, SHT2x_TIMEOUT);
 	HAL_I2C_Master_Receive(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, &val, 1, SHT2x_TIMEOUT);
@@ -44,10 +49,10 @@ uint8_t SHT2x_ReadUserReg(void) {
  * @return 16-bit raw value, 0 to 65535.
  */
 uint16_t SHT2x_GetRaw(uint8_t cmd) {
-	uint8_t val[3] = { 0 };
+	uint8_t val[3] = {0};
 	HAL_I2C_Master_Transmit(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, &cmd, 1, SHT2x_TIMEOUT);
 	HAL_I2C_Master_Receive(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, val, 3, SHT2x_TIMEOUT);
-	return val[0] << 8 | val[1];
+	return BUF_TO_VALUE(val);
 }
 
 /**
@@ -57,7 +62,7 @@ uint16_t SHT2x_GetRaw(uint8_t cmd) {
  */
 float SHT2x_GetTemperature(SHT2x_MasterMode mode) {
 	uint8_t cmd = (mode ? SHT2x_READ_TEMP_HOLD : SHT2x_READ_TEMP_NOHOLD);
-	return -46.85 + 175.72 * (SHT2x_GetRaw(cmd) / 65536.0);
+	return (float)(-46.85 + 175.72 * (SHT2x_GetRaw(cmd) / SHT2x_DIVIDER));
 }
 
 /**
@@ -67,7 +72,7 @@ float SHT2x_GetTemperature(SHT2x_MasterMode mode) {
  */
 float SHT2x_GetRelativeHumidity(SHT2x_MasterMode mode) {
 	uint8_t cmd = (mode ? SHT2x_READ_RH_HOLD : SHT2x_READ_RH_NOHOLD);
-	return -6 + 125.00 * (SHT2x_GetRaw(cmd) / 65536.0);
+	return (float)(-6 + 125.00 * (SHT2x_GetRaw(cmd) / SHT2x_DIVIDER));
 }
 
 /**
@@ -80,7 +85,7 @@ void SHT2x_SetResolution(SHT2x_Resolution res) {
 	uint8_t val = SHT2x_ReadUserReg();
 	val = (val & 0x7e) | res;
 	uint8_t temp[2] = { SHT2x_WRITE_REG, val };
-	HAL_I2C_Master_Transmit(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, temp, 2, SHT2x_TIMEOUT);
+	HAL_I2C_Master_Transmit(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, temp, sizeof(temp)/sizeof(temp[0]), SHT2x_TIMEOUT);
 }
 
 /**
@@ -89,7 +94,7 @@ void SHT2x_SetResolution(SHT2x_Resolution res) {
  * @return Floating point temperature in degrees Fahrenheit.
  */
 float SHT2x_CelsiusToFahrenheit(float celsius) {
-	return (9.0 / 5.0) * celsius + 32;
+	return (float)((9.0 / 5.0) * celsius + 32);
 }
 
 /**
@@ -98,7 +103,7 @@ float SHT2x_CelsiusToFahrenheit(float celsius) {
  * @return Floating point temperature in Kelvin.
  */
 float SHT2x_CelsiusToKelvin(float celsius) {
-	return celsius + 273;
+	return (float)(celsius + 273.0);
 }
 
 /**
@@ -108,7 +113,7 @@ float SHT2x_CelsiusToKelvin(float celsius) {
  * @return Integer part of floating point number.
  */
 int32_t SHT2x_GetInteger(float num) {
-	return num / 1;
+	return (int32_t)(num / 1L);
 }
 
 /**
@@ -117,9 +122,9 @@ int32_t SHT2x_GetInteger(float num) {
  * @param num Floating point number.
  * @return Decimal part of floating point number.
  */
-uint32_t SHT2x_GetDecimal(float num, int digits) {
-	float postDec = num - SHT2x_GetInteger(num);
-	return postDec * SHT2x_Ipow(10, digits);
+uint32_t SHT2x_GetDecimal(float num, uint8_t digits) {
+	float postDec = num - (float)SHT2x_GetInteger(num);
+	return (uint32_t)postDec * SHT2x_Ipow(10, digits);
 }
 
 /**
@@ -128,52 +133,90 @@ uint32_t SHT2x_GetDecimal(float num, int digits) {
  * @param power Power.
  * @return
  */
-uint32_t SHT2x_Ipow(uint32_t base, uint32_t power) {
+static uint32_t SHT2x_Ipow(uint32_t base, uint8_t power) {
 	uint32_t temp = base;
-	for (uint32_t i = 1; i < power; i++)
+	for (uint8_t i = 1; i < power; i++)
 		temp *= base;
 	return temp;
 }
 
-uint8_t SHT2x_GetRaw_NonBlock(SHT2x_Param param, SHT2x_MasterMode mode) {
-  static uint8_t is_rx = 0;
-
+static HAL_StatusTypeDef SHT2x_SendRequestData(SHT2x_ParamType param_type, SHT2x_MasterMode mode) {
   uint8_t cmd = 0;
-  if (param == SHT2x_TEMPERATURE) {
+  if (param_type == SHT2x_TEMPERATURE) {
     cmd = (mode ? SHT2x_READ_TEMP_HOLD : SHT2x_READ_TEMP_NOHOLD);
-  } else if (param == SHT2x_HUMIDITY) {
+  } else if (param_type == SHT2x_HUMIDITY) {
     cmd = (mode ? SHT2x_READ_RH_HOLD : SHT2x_READ_RH_NOHOLD);
   }
 
-  if (!is_rx) {
-    receive_complited = 0;
-    is_rx = 1;
-    HAL_I2C_Master_Transmit(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, &cmd, 1, SHT2x_TIMEOUT);
-    HAL_I2C_Master_Receive_IT(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, raw_val, 3);
-  }
-
-  if (receive_complited && is_rx) {
-    receive_complited = 0;
-    is_rx = 0;
-    return 0;
-  }
-
-  return 1;
+  return HAL_I2C_Master_Transmit(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, &cmd, sizeof(cmd), SHT2x_TIMEOUT);
 }
 
-float SHT2x_ReadRelativeHumidity(void) {
-  uint16_t val = raw_val[0] << 8 | raw_val[1];
-  return -6 + 125.00 * (val / 65536.0);
+static HAL_StatusTypeDef SHT2x_NonBlock_StartReceive(void) {
+  return HAL_I2C_Master_Receive_IT(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, raw_val, sizeof(raw_val)/sizeof(raw_val[0]));
 }
 
-float SHT2x_ReadTemperature(void) {
-  uint16_t val = raw_val[0] << 8 | raw_val[1];
-  return -46.85 + 175.72 * (val / 65536.0);
+static uint8_t calculate_crc8(uint8_t* data, size_t len)
+{
+  uint8_t crc = 0x00; // init value (see "CRC Checksum Calculation for SHT2x")
+
+  for (uint8_t i = 0; i < len; i++) {
+    crc ^= data[i];
+    for (uint8_t j = 0; j < 8; j++) {
+      if ((crc & 0x80) != 0) {
+        crc = (uint8_t)((crc << 1) ^ 0x31);
+      } else {
+        crc <<= 1;
+      }
+    }
+  }
+  return crc;
+}
+
+SHT2x_RequestStatus SHT2x_NonBlock_RequestRaw(SHT2x_ParamType param, SHT2x_MasterMode mode) {
+  static _Bool is_sended_request = false;
+  static _Bool is_waiting_data   = false;
+
+  SHT2x_RequestStatus result = SHT2x_REQ_DATA_WAIT;
+
+  if (is_sended_request == false) {
+    if (SHT2x_SendRequestData(param, mode) == HAL_OK) {
+      is_sended_request = true;
+      is_waiting_data   = false;
+    }
+  }
+
+  if (is_waiting_data == false) {
+    if (SHT2x_NonBlock_StartReceive() == HAL_OK) {
+      is_waiting_data  = true;
+      is_reseived_data = false;
+    }
+  }
+
+  if (is_reseived_data) { // Меняется в прерывании HAL_I2C_MasterRxCpltCallback
+    is_sended_request = false;
+
+    uint8_t crc = calculate_crc8(raw_val, 2);
+    if (crc == raw_val[2]) {
+      result = SHT2x_REQ_DATA_RECEIVED;
+    }
+  }
+
+  return result;
+}
+
+float SHT2x_NonBlock_ReadRelativeHumidity(void) {
+  uint16_t val = BUF_TO_VALUE(raw_val);
+  return (float)(-6.0 + 125.0 * (val / SHT2x_DIVIDER));
+}
+
+float SHT2x_NonBlock_ReadTemperature(void) {
+  uint16_t val = BUF_TO_VALUE(raw_val);
+  return (float)(-46.85 + 175.72 * (val / SHT2x_DIVIDER));
 }
 
 void HAL_I2C_MasterRxCpltCallback (I2C_HandleTypeDef * hi2c) {
   if (hi2c == _sht2x_ui2c) {
-    receive_complited = 1;
+    is_reseived_data = true;
   }
 }
 
