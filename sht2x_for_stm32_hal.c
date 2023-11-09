@@ -148,7 +148,14 @@ static HAL_StatusTypeDef SHT2x_SendRequestData(SHT2x_ParamType param_type, SHT2x
     cmd = (mode ? SHT2x_READ_RH_HOLD : SHT2x_READ_RH_NOHOLD);
   }
 
-  return HAL_I2C_Master_Transmit(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, &cmd, sizeof(cmd), SHT2x_TIMEOUT);
+  HAL_StatusTypeDef transmit_status = HAL_BUSY;
+  /* Проверка доступности сенсора здесь, чтобы не попасть в бесконечный
+   * цикл I2C_WaitOnFlagUntilTimeout, внутри функции HAL_I2C_Master_Transmit*/
+  uint8_t           i2c_line_status = __HAL_I2C_GET_FLAG(_sht2x_ui2c, I2C_FLAG_BUSY);
+  if (i2c_line_status != SET) {
+    transmit_status = HAL_I2C_Master_Transmit(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, &cmd, sizeof(cmd), SHT2x_TIMEOUT);
+  }
+  return transmit_status;
 }
 
 static HAL_StatusTypeDef SHT2x_NonBlock_StartReceive(void) {
@@ -181,13 +188,13 @@ SHT2x_RequestStatus SHT2x_NonBlock_RequestRaw(SHT2x_ParamType param, SHT2x_Maste
   if (is_sended_request == false) {
     if (SHT2x_SendRequestData(param, mode) == HAL_OK) {
       is_sended_request = true;
-      is_waiting_data   = false;
+      is_waiting_data   = true;
     }
   }
 
-  if (is_waiting_data == false) {
+  if (is_waiting_data) {
     if (SHT2x_NonBlock_StartReceive() == HAL_OK) {
-      is_waiting_data  = true;
+      is_waiting_data  = false;
       is_reseived_data = false;
     }
   }
