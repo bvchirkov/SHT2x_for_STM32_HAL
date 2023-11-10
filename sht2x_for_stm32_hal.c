@@ -6,14 +6,14 @@
 extern "C"{
 #endif
 
-#define BUF_TO_VALUE(BUF) (uint16_t)(((BUF[0] << 8) & 0xFF00) | (BUF[1] & 0x00FF))
+#define BUF_TO_VALUE(BUF) (uint16_t)( (uint16_t)((BUF[0] << 8) & 0xFF00) | BUF[1] )
 
 static uint32_t SHT2x_Ipow(uint32_t, uint8_t);
 
-I2C_HandleTypeDef*  _sht2x_ui2c  = NULL;
-uint8_t             raw_val[3]   = {0};
+static I2C_HandleTypeDef*  _sht2x_ui2c  = NULL;
+static uint8_t             raw_val[3]   = {0};
 
-__IO _Bool is_reseived_data = false;
+static __IO _Bool is_reseived_data = false;
 	
 /**
  * @brief Initializes the SHT2x temperature/humidity sensor.
@@ -55,6 +55,16 @@ uint16_t SHT2x_GetRaw(uint8_t cmd) {
 	return BUF_TO_VALUE(val);
 }
 
+static inline float SHT2x_RawToTemperature(uint16_t raw_value)
+{
+  return (float)(-46.85 + 175.72 * (raw_value / SHT2x_DIVIDER));
+}
+
+static inline float SHT2x_RawToRelativeHumidity(uint16_t raw_value)
+{
+  return (float)(-6.0 + 125.0 * (raw_value / SHT2x_DIVIDER));
+}
+
 /**
  * @brief Measures and gets the current temperature.
  * @param hold Holding mode, 0 for no hold master, 1 for hold master.
@@ -62,7 +72,7 @@ uint16_t SHT2x_GetRaw(uint8_t cmd) {
  */
 float SHT2x_GetTemperature(SHT2x_MasterMode mode) {
 	uint8_t cmd = (mode ? SHT2x_READ_TEMP_HOLD : SHT2x_READ_TEMP_NOHOLD);
-	return (float)(-46.85 + 175.72 * (SHT2x_GetRaw(cmd) / SHT2x_DIVIDER));
+	return SHT2x_RawToTemperature(SHT2x_GetRaw(cmd));
 }
 
 /**
@@ -72,7 +82,7 @@ float SHT2x_GetTemperature(SHT2x_MasterMode mode) {
  */
 float SHT2x_GetRelativeHumidity(SHT2x_MasterMode mode) {
 	uint8_t cmd = (mode ? SHT2x_READ_RH_HOLD : SHT2x_READ_RH_NOHOLD);
-	return (float)(-6 + 125.00 * (SHT2x_GetRaw(cmd) / SHT2x_DIVIDER));
+	return SHT2x_RawToRelativeHumidity(SHT2x_GetRaw(cmd));
 }
 
 /**
@@ -140,30 +150,40 @@ static uint32_t SHT2x_Ipow(uint32_t base, uint8_t power) {
 	return temp;
 }
 
-static HAL_StatusTypeDef SHT2x_SendRequestData(SHT2x_ParamType param_type, SHT2x_MasterMode mode) {
-  uint8_t cmd = 0;
-  if (param_type == SHT2x_TEMPERATURE) {
-    cmd = (mode ? SHT2x_READ_TEMP_HOLD : SHT2x_READ_TEMP_NOHOLD);
-  } else if (param_type == SHT2x_HUMIDITY) {
-    cmd = (mode ? SHT2x_READ_RH_HOLD : SHT2x_READ_RH_NOHOLD);
+/**
+ * @brief Проверка доступности сенсора, чтобы не попасть в бесконечный
+          цикл I2C_WaitOnFlagUntilTimeout, внутри функции HAL_I2C_Master_Transmit
+ *
+ * @return true - если сенсор готов принять запрос
+ */
+static _Bool SHT2x_IsAvialableSensor(void) {
+  return (__HAL_I2C_GET_FLAG(_sht2x_ui2c, I2C_FLAG_BUSY) != SET);
+}
+
+static HAL_StatusTypeDef SHT2x_I2C_Master_Transmit(uint8_t* cmd, uint16_t size) {
+  if (SHT2x_IsAvialableSensor()) {
+    return HAL_I2C_Master_Transmit(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, cmd, size, SHT2x_TIMEOUT);
   }
 
-  HAL_StatusTypeDef transmit_status = HAL_BUSY;
-  /* Проверка доступности сенсора здесь, чтобы не попасть в бесконечный
-   * цикл I2C_WaitOnFlagUntilTimeout, внутри функции HAL_I2C_Master_Transmit*/
-  uint8_t           i2c_line_status = __HAL_I2C_GET_FLAG(_sht2x_ui2c, I2C_FLAG_BUSY);
-  if (i2c_line_status != SET) {
-    transmit_status = HAL_I2C_Master_Transmit(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, &cmd, sizeof(cmd), SHT2x_TIMEOUT);
+  return (HAL_StatusTypeDef) HAL_BUSY;
+}
+
+static HAL_StatusTypeDef SHT2x_NonBlock_SendRequest(SHT2x_MeasurementType measurement_type, SHT2x_MasterMode sensor_mode) {
+  uint8_t cmd = 0;
+  if (measurement_type == SHT2x_TEMPERATURE) {
+    cmd = (sensor_mode ? SHT2x_READ_TEMP_HOLD : SHT2x_READ_TEMP_NOHOLD);
+  } else if (measurement_type == SHT2x_HUMIDITY) {
+    cmd = (sensor_mode ? SHT2x_READ_RH_HOLD   : SHT2x_READ_RH_NOHOLD);
   }
-  return transmit_status;
+
+  return SHT2x_I2C_Master_Transmit(&cmd, sizeof(cmd));
 }
 
 static HAL_StatusTypeDef SHT2x_NonBlock_StartReceive(void) {
   return HAL_I2C_Master_Receive_IT(_sht2x_ui2c, SHT2x_I2C_ADDR << 1, raw_val, sizeof(raw_val)/sizeof(raw_val[0]));
 }
 
-static uint8_t calculate_crc8(uint8_t* data, size_t len)
-{
+static uint8_t SHT2x_Calculate_CRC8(uint8_t* data, size_t len) {
   uint8_t crc = 0x00; // init value (see "CRC Checksum Calculation for SHT2x")
 
   for (uint8_t i = 0; i < len; i++) {
@@ -179,14 +199,14 @@ static uint8_t calculate_crc8(uint8_t* data, size_t len)
   return crc;
 }
 
-SHT2x_RequestStatus SHT2x_NonBlock_RequestRaw(SHT2x_ParamType param, SHT2x_MasterMode mode) {
+SHT2x_RequestStatus SHT2x_NonBlock_RequestMeasurement(SHT2x_MeasurementType measurement_type) {
   static _Bool is_sended_request = false;
   static _Bool is_waiting_data   = false;
 
   SHT2x_RequestStatus result = SHT2x_REQ_DATA_WAIT;
 
   if (is_sended_request == false) {
-    if (SHT2x_SendRequestData(param, mode) == HAL_OK) {
+    if (SHT2x_NonBlock_SendRequest(measurement_type, SHT2x_I2C_MODE) == HAL_OK) {
       is_sended_request = true;
       is_waiting_data   = true;
     }
@@ -202,7 +222,7 @@ SHT2x_RequestStatus SHT2x_NonBlock_RequestRaw(SHT2x_ParamType param, SHT2x_Maste
   if (is_reseived_data) { // Меняется в прерывании HAL_I2C_MasterRxCpltCallback
     is_sended_request = false;
 
-    uint8_t crc = calculate_crc8(raw_val, 2);
+    uint8_t crc = SHT2x_Calculate_CRC8(raw_val, 2);
     if (crc == raw_val[2]) {
       result = SHT2x_REQ_DATA_RECEIVED;
     }
@@ -212,13 +232,11 @@ SHT2x_RequestStatus SHT2x_NonBlock_RequestRaw(SHT2x_ParamType param, SHT2x_Maste
 }
 
 float SHT2x_NonBlock_ReadRelativeHumidity(void) {
-  uint16_t val = BUF_TO_VALUE(raw_val);
-  return (float)(-6.0 + 125.0 * (val / SHT2x_DIVIDER));
+  return SHT2x_RawToRelativeHumidity(BUF_TO_VALUE(raw_val));
 }
 
 float SHT2x_NonBlock_ReadTemperature(void) {
-  uint16_t val = BUF_TO_VALUE(raw_val);
-  return (float)(-46.85 + 175.72 * (val / SHT2x_DIVIDER));
+  return SHT2x_RawToTemperature(BUF_TO_VALUE(raw_val));
 }
 
 void HAL_I2C_MasterRxCpltCallback (I2C_HandleTypeDef * hi2c) {

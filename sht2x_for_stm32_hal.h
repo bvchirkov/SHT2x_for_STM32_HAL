@@ -15,6 +15,7 @@
 #define SHT2x_TIMEOUT			      500
 
 #define SHT2x_DIVIDER           (float)(1 << 16)
+#define SHT2x_I2C_MODE          ((SHT2x_MasterMode)SHT2x_HOLD_MASTER)
 /*----------------------------------------------------------------------------*/
 typedef enum SHT2x_Resolution {
 	RES_14_12 = 0x00,
@@ -26,7 +27,7 @@ typedef enum SHT2x_Resolution {
 typedef enum SHT2x_Param {
   SHT2x_TEMPERATURE,
   SHT2x_HUMIDITY
-} SHT2x_ParamType;
+} SHT2x_MeasurementType;
 
 typedef enum SHT2x_MasterMode {
   SHT2x_NO_HOLD_MASTER,
@@ -39,8 +40,6 @@ typedef enum SHT2x_NBRequest_Status
   SHT2x_REQ_DATA_WAIT
 } SHT2x_RequestStatus;
 /*----------------------------------------------------------------------------*/
-extern I2C_HandleTypeDef *_sht2x_ui2c;
-
 void SHT2x_Init(I2C_HandleTypeDef *hi2c);
 void SHT2x_SoftReset(void);
 void SHT2x_SetResolution(SHT2x_Resolution res);
@@ -58,7 +57,7 @@ float SHT2x_CelsiusToKelvin(float celsius);
 int32_t  SHT2x_GetInteger(float f);
 uint32_t SHT2x_GetDecimal(float f, uint8_t digits);
 
-SHT2x_RequestStatus SHT2x_NonBlock_RequestRaw(SHT2x_ParamType param, SHT2x_MasterMode mode);
+SHT2x_RequestStatus SHT2x_NonBlock_RequestMeasurement(SHT2x_MeasurementType data_type);
 float               SHT2x_NonBlock_ReadRelativeHumidity(void);
 float               SHT2x_NonBlock_ReadTemperature(void);
 
